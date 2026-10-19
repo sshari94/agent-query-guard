@@ -102,6 +102,23 @@ Exit code is 0 when the query is allowed (or ran successfully) and 1 otherwise, 
 
 Start with the audit log in place and generous limits, look at what your agents actually send, then tighten `max_estimated_rows` to just above your largest legitimate query. Optimizer estimates are approximate: they are good at catching queries that are orders of magnitude too big, which is the case that hurts.
 
+## Configuration used in the evaluation
+
+The guard's evaluation (a 222-query agent corpus plus dashboard traffic on a synthetic
+manufacturing database) used four layers. This is the equivalent `Policy`:
+
+```python
+Policy(
+    large_tables=frozenset({"unit_events", "test_results", "units"}),  # static rules
+    max_estimated_rows=5_793_600,                                      # cost estimate
+    timeout_s=5.0, max_result_rows=100_000,                            # runtime limits
+    session_budget_s=15.0, session_window_s=60.0,                      # session budget
+)
+```
+
+The library's extra static rules (denied functions, writes hidden in CTEs, multiple
+statements) changed no admission decision on that corpus.
+
 ## Roadmap
 
 - ClickHouse, Snowflake and BigQuery backends (BigQuery dry-run bytes, Snowflake `EXPLAIN`)

@@ -95,26 +95,27 @@ class QueryGuard:
         if violations:
             return Decision(False, violations[0].rule, "; ".join(map(str, violations)))
 
-        spent, count = self._session_usage(session)
-        if p.session_budget_s is not None and spent >= p.session_budget_s:
-            return Decision(False, "session_budget",
-                            f"{spent:.1f}s used of {p.session_budget_s}s per {p.session_window_s:.0f}s")
-        if p.session_max_queries is not None and count >= p.session_max_queries:
-            return Decision(False, "session_query_limit",
-                            f"{count} queries per {p.session_window_s:.0f}s")
+        est = Estimate()
+        if p.max_estimated_rows is not None or p.max_estimated_cost is not None:
+            try:
+                est = self.backend.estimate(sql)
+            except Exception as e:
+                return Decision(False, "explain_failed", str(e))
+            if p.max_estimated_rows is not None and (est.rows or 0) > p.max_estimated_rows:
+                detail = f"plan estimates {est.rows:,} rows, limit {p.max_estimated_rows:,}"
+                return _with(est, Decision(False, "estimated_rows", detail))
+            if p.max_estimated_cost is not None and (est.cost or 0) > p.max_estimated_cost:
+                return _with(est, Decision(False, "estimated_cost",
+                                           f"plan cost {est.cost:,.0f}, limit {p.max_estimated_cost:,.0f}"))
 
-        if p.max_estimated_rows is None and p.max_estimated_cost is None:
-            return Decision(True)
-        try:
-            est = self.backend.estimate(sql)
-        except Exception as e:
-            return Decision(False, "explain_failed", str(e))
-        if p.max_estimated_rows is not None and (est.rows or 0) > p.max_estimated_rows:
-            return _with(est, Decision(False, "estimated_rows",
-                                       f"plan estimates {est.rows:,} rows, limit {p.max_estimated_rows:,}"))
-        if p.max_estimated_cost is not None and (est.cost or 0) > p.max_estimated_cost:
-            return _with(est, Decision(False, "estimated_cost",
-                                       f"plan cost {est.cost:,.0f}, limit {p.max_estimated_cost:,.0f}"))
+        # A session may finish the query that takes it over budget; the next one is refused.
+        spent, count = self._session_usage(session)
+        if p.session_budget_s is not None and spent > p.session_budget_s:
+            detail = f"{spent:.1f}s used of {p.session_budget_s}s per {p.session_window_s:.0f}s"
+            return _with(est, Decision(False, "session_budget", detail))
+        if p.session_max_queries is not None and count >= p.session_max_queries:
+            return _with(est, Decision(False, "session_query_limit",
+                                       f"{count} queries per {p.session_window_s:.0f}s"))
         return _with(est, Decision(True))
 
     def run(self, sql: str, session: str = "default") -> Result:

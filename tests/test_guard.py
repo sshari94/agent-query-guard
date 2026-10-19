@@ -59,3 +59,16 @@ def test_postgres_plan_parsing():
                       "Plans": [{"Plan Rows": 90000}, {"Plan Rows": 10}]}}]
     est = postgres_estimate(plan)
     assert est.rows == 90000 and est.cost == 1234.5
+
+
+def test_session_budget_allows_the_query_that_crosses_it_then_blocks(con):
+    guard = QueryGuard.for_duckdb(con, Policy(session_budget_s=0.0, max_estimated_rows=None))
+    assert guard.run("SELECT 1", session="s").status == "ok"
+    blocked = guard.run("SELECT 1", session="s")
+    assert blocked.status == "blocked" and blocked.decision.reason == "session_budget"
+
+
+def test_static_rules_are_checked_before_the_cost_estimate(con):
+    guard = QueryGuard.for_duckdb(con, Policy(max_estimated_rows=1))
+    assert guard.check("SELECT * FROM units u, events e").reason == "cartesian_join"
+    assert guard.check("SELECT * FROM units u JOIN events e ON u.id = e.unit_id").reason == "estimated_rows"
