@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-query-guard"
+version = "0.1.0"
+description = "Admission control for SQL written by AI agents: block runaway, unsafe and over-budget queries before they hit a shared database."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Srihari Srithar" }]
+keywords = ["llm", "ai-agents", "text-to-sql", "guardrails", "sql", "duckdb", "postgres", "mcp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Database",
+  "Programming Language :: Python :: 3",
+]
+dependencies = ["sqlglot>=25"]
+
+[project.optional-dependencies]
+duckdb = ["duckdb>=1.0"]
+postgres = ["psycopg[binary]>=3.1"]
+mcp = ["mcp>=1.2"]
+dev = ["pytest>=8", "duckdb>=1.0", "ruff>=0.5"]
+
+[project.scripts]
+agent-query-guard = "query_guard.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sshari94/agent-query-guard"
+Issues = "https://github.com/sshari94/agent-query-guard/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/query_guard"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
