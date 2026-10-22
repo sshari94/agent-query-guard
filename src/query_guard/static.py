@@ -17,6 +17,11 @@ DEFAULT_DENIED_FUNCTIONS = frozenset({
     "pg_sleep", "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "lo_import",
     "lo_export", "dblink", "dblink_exec", "pg_terminate_backend", "pg_cancel_backend",
     "set_config",
+    # ClickHouse table functions that read files, URLs, object stores or other servers
+    "url", "urlcluster", "file", "filecluster", "s3", "s3cluster", "gcs", "azureblobstorage",
+    "azureblobstoragecluster", "hdfs", "hdfscluster", "remote", "remotesecure", "cluster",
+    "clusterallreplicas", "mysql", "postgresql", "mongodb", "redis", "sqlite", "jdbc", "odbc",
+    "executable", "executablepool", "input", "deltalake", "iceberg", "hudi",
 })
 
 _WRITE_NODES = (
@@ -101,6 +106,12 @@ def check(
     denied = tables & {t.lower() for t in denied_tables}
     if denied:
         out.append(Violation("denied_table", ", ".join(sorted(denied))))
+
+    # A SETTINGS clause (ClickHouse) could raise or remove the limits the guard sets per query.
+    for sel in tree.find_all(exp.Select):
+        if sel.args.get("settings"):
+            out.append(Violation("query_settings", "SETTINGS clauses are not allowed"))
+            break
 
     large = {t.lower() for t in large_tables}
     for sel in tree.find_all(exp.Select):

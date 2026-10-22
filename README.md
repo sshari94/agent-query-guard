@@ -26,13 +26,14 @@ reads a file                 blocked  denied_function: read_csv
 
 Every refusal comes back with a machine-readable reason and a human-readable detail, so the agent can rewrite the query instead of failing. An optional JSONL audit log records every decision.
 
-Supported today: **DuckDB** and **PostgreSQL** (any DB-API connection: psycopg 3 or psycopg2). On Postgres each query also runs in a `READ ONLY` transaction with `statement_timeout`, so the guard is not the only line of defence.
+Supported today: **DuckDB**, **PostgreSQL** (any DB-API connection: psycopg 3 or psycopg2) and **ClickHouse** (clickhouse-connect). The guard is not the only line of defence: on Postgres each query runs in a `READ ONLY` transaction with `statement_timeout`, and on ClickHouse the server itself enforces `readonly`, `max_execution_time` and `max_result_rows` on every query.
 
 ## Install
 
 ```bash
 pip install "agent-query-guard[duckdb]"      # DuckDB
 pip install "agent-query-guard[postgres]"    # Postgres
+pip install "agent-query-guard[clickhouse]"  # ClickHouse
 pip install "agent-query-guard[mcp]"         # MCP server for Claude Desktop, Cursor and other MCP clients
 ```
 
@@ -94,6 +95,7 @@ The server exposes `run_query`, `check_query` and `list_tables`.
 agent-query-guard check "SELECT * FROM a, b"                    # static rules only, no database
 agent-query-guard check --duckdb db.duckdb "SELECT ..."         # adds the cost estimate
 agent-query-guard run   --postgres "postgresql://..." "SELECT ..."
+agent-query-guard mcp   --clickhouse "clickhouse://user:pass@host:8123/analytics"
 ```
 
 Exit code is 0 when the query is allowed (or ran successfully) and 1 otherwise, so it also works in CI to lint SQL that agents or people generate.
@@ -101,6 +103,25 @@ Exit code is 0 when the query is allowed (or ran successfully) and 1 otherwise, 
 ## Tuning
 
 Start with the audit log in place and generous limits, look at what your agents actually send, then tighten `max_estimated_rows` to just above your largest legitimate query. Optimizer estimates are approximate: they are good at catching queries that are orders of magnitude too big, which is the case that hurts.
+
+## ClickHouse notes
+
+```python
+import clickhouse_connect
+from query_guard import Policy, QueryGuard
+
+client = clickhouse_connect.get_client(host="localhost", username="agent", password="...")
+guard = QueryGuard.for_clickhouse(client, Policy(max_estimated_rows=500_000_000, timeout_s=10))
+```
+
+- The cost estimate is the number of rows ClickHouse expects to **read** (`EXPLAIN ESTIMATE`),
+  after primary-key and partition pruning. Queries that filter on the sorting key pass; full
+  scans of large tables are refused.
+- `EXPLAIN ESTIMATE` does not model join output size, so a join blow-up is stopped by the
+  server-side `max_execution_time` and `max_result_rows` rather than up front.
+- Table functions that reach outside the database (`url`, `s3`, `file`, `remote`, `mysql`,
+  `executable`, ...) are refused, and so are `SETTINGS` clauses, which could otherwise lift the
+  limits the guard sets on each query.
 
 ## Configuration used in the evaluation
 
@@ -121,7 +142,7 @@ statements) changed no admission decision on that corpus.
 
 ## Roadmap
 
-- ClickHouse, Snowflake and BigQuery backends (BigQuery dry-run bytes, Snowflake `EXPLAIN`)
+- Snowflake and BigQuery backends (BigQuery dry-run bytes, Snowflake `EXPLAIN`)
 - Per-user and per-team budgets shared across processes (Redis)
 - Suggested rewrites in refusals (add a filter on the partition column, aggregate first)
 - A public benchmark of agent-generated queries labelled harmful or harmless

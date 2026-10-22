@@ -13,7 +13,7 @@ from typing import Any
 from sqlglot import exp
 
 from . import static
-from .backends import Backend, DuckDBBackend, Estimate, PostgresBackend
+from .backends import Backend, ClickHouseBackend, DuckDBBackend, Estimate, PostgresBackend
 
 
 @dataclass
@@ -78,6 +78,10 @@ class QueryGuard:
     @classmethod
     def for_duckdb(cls, con: Any, policy: Policy | None = None, **kw) -> QueryGuard:
         return cls(DuckDBBackend(con), policy, **kw)
+
+    @classmethod
+    def for_clickhouse(cls, client: Any, policy: Policy | None = None, **kw) -> QueryGuard:
+        return cls(ClickHouseBackend(client), policy, **kw)
 
     @classmethod
     def for_postgres(cls, conn: Any, policy: Policy | None = None, **kw) -> QueryGuard:

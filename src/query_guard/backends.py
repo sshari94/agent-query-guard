@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 @dataclass
 class Estimate:
-    rows: int | None = None  # largest intermediate row count in the plan
+    rows: int | None = None  # largest intermediate row count in the plan (rows read, on ClickHouse)
     cost: float | None = None  # optimizer cost units, where the engine reports them
 
 
@@ -132,3 +132,51 @@ def postgres_estimate(explain: list) -> Estimate:
         return max([int(node.get("Plan Rows", 0))] + [walk(c) for c in node.get("Plans", [])])
 
     return Estimate(rows=walk(plan), cost=float(plan.get("Total Cost", 0.0)))
+
+
+class ClickHouseBackend:
+    """Wraps a clickhouse-connect client (``clickhouse_connect.get_client(...)``).
+
+    The estimate is the number of rows ClickHouse expects to read (``EXPLAIN ESTIMATE``),
+    summed over tables. Limits are also enforced by the server itself on every query:
+    ``readonly``, ``max_execution_time`` and ``max_result_rows``.
+    """
+
+    dialect = "clickhouse"
+
+    def __init__(self, client: Any, settings: dict[str, Any] | None = None):
+        self.client = client
+        self.settings = settings or {}
+
+    def estimate(self, sql: str) -> Estimate:
+        res = self.client.query("EXPLAIN ESTIMATE " + sql)
+        idx = res.column_names.index("rows")
+        return Estimate(rows=sum(int(r[idx]) for r in res.result_rows))
+
+    def execute(self, sql: str, timeout_s: float | None, max_rows: int) -> Execution:
+        settings = {
+            "readonly": 2,  # no writes; 2 still lets this request set the limits below
+            "max_result_rows": max_rows + 1,
+            "result_overflow_mode": "break",
+            **self.settings,
+        }
+        if timeout_s:
+            settings["max_execution_time"] = timeout_s
+            settings["timeout_overflow_mode"] = "throw"
+        t0 = time.perf_counter()
+        try:
+            res = self.client.query(sql, settings=settings)
+            rows = [tuple(r) for r in res.result_rows]
+            truncated = len(rows) > max_rows
+            return Execution("ok", list(res.column_names), rows[:max_rows], truncated,
+                             time.perf_counter() - t0)
+        except Exception as e:
+            msg = str(e)
+            status = "timeout" if "TIMEOUT_EXCEEDED" in msg or "Timeout exceeded" in msg else "error"
+            return Execution(status, seconds=time.perf_counter() - t0, error=msg)
+
+    def tables(self) -> list[str]:
+        res = self.client.query(
+            "SELECT database || '.' || name FROM system.tables "
+            "WHERE database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema') ORDER BY 1")
+        return [r[0] for r in res.result_rows]

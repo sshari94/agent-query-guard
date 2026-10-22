@@ -26,13 +26,20 @@ def _guard(args) -> QueryGuard:
         import duckdb
         con = duckdb.connect(args.duckdb, read_only=True)
         return QueryGuard.for_duckdb(con, _policy(args), audit=args.audit)
+    if args.clickhouse:
+        try:
+            import clickhouse_connect
+        except ImportError:
+            sys.exit("ClickHouse support needs: pip install 'agent-query-guard[clickhouse]'")
+        client = clickhouse_connect.get_client(dsn=args.clickhouse)
+        return QueryGuard.for_clickhouse(client, _policy(args), audit=args.audit)
     if args.postgres:
         try:
             import psycopg
         except ImportError:
             sys.exit("Postgres support needs: pip install 'agent-query-guard[postgres]'")
         return QueryGuard.for_postgres(psycopg.connect(args.postgres), _policy(args), audit=args.audit)
-    sys.exit("Pass --duckdb PATH or --postgres DSN")
+    sys.exit("Pass --duckdb PATH, --postgres DSN or --clickhouse DSN")
 
 
 def main(argv=None) -> None:
@@ -44,6 +51,7 @@ def main(argv=None) -> None:
             p.add_argument("sql")
         p.add_argument("--duckdb", metavar="PATH")
         p.add_argument("--postgres", metavar="DSN")
+        p.add_argument("--clickhouse", metavar="DSN", help="e.g. clickhouse://user:pass@host:8123/db")
         p.add_argument("--dialect", help="SQL dialect for check without a database")
         p.add_argument("--max-estimated-rows", type=int, default=50_000_000)
         p.add_argument("--timeout", type=float, default=10.0)
@@ -55,7 +63,7 @@ def main(argv=None) -> None:
         p.add_argument("--audit", metavar="FILE", help="append a JSON line per query")
     args = ap.parse_args(argv)
 
-    if args.cmd == "check" and not (args.duckdb or args.postgres):
+    if args.cmd == "check" and not (args.duckdb or args.postgres or args.clickhouse):
         p = _policy(args)
         violations = static.check(args.sql, dialect=args.dialect, large_tables=p.large_tables,
                                   denied_tables=p.denied_tables, allowed_tables=p.allowed_tables)
