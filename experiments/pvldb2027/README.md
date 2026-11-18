@@ -32,6 +32,7 @@ python3 analyze_pg.py --pg ../results/e1_pg_ground_truth.json --duck ../results/
 python3 e4_predictors.py ../results/e1_ground_truth.json ../results/e1_pg_ground_truth.json ../results/e4_heldout.json
 python3 stats.py ../results ../results/stats_both.json     # Tables 3-4: means, 95% CIs, Welch and Mann-Whitney tests
 python3 fig_engines5.py ../results/stats_both.json ../results
+python3 fig_extra.py ../results ../results        # threshold-sweep and repair-loop figures
 ```
 
 ## Re-run the experiments from scratch (about 6 hours on 4 cores)
